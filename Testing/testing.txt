@@ -1,0 +1,69 @@
+1. Testing Approach
+
+1.1 Testing structures
+  Well, this might be the first time for me to do the programming C test. At the beginning of the development process, I realized that I should construct Teletext and test respectively in that it enables me to build my code continually. I did lots of efforts on figuring up how to implement test into C, although I thought myself could just make test simply with “ assert() ”, but assert seems cannot automate as much testing as I needed. Fortunately, I found out the key phrases which were “Unit Test”. In addition, Unit Test is a best practice in any modern methodology, including Agile development. With automatic unit testing in place, if we introduce a bug into the software, one or more tests will fail and we’ll know about it immediately. However, there are several pre-existing ways to perform the test. For instance, like AceUnit, GNU Autounit, CUnit, Cu Test and Check, etc. As a result, I chose Check being my testing framework. (http://blog.csdn.net/ZCF1002797280/article/details/50421336)
+  Check features a simple interface for defining unit tests, putting little in the way of the developer. Tests are executed in a separate address space, so both assertion failures and code errors that cause segmentation faults or other signals can be caught. Test results are reportable in the following: Subunit, TAP, XML, and a generic logging format.
+  On the other hand, Check works on many UNIX compatible environments, such as GNU/Linux, GNU/Hurd, BSD, and Mac OSX. So it looks like using Check does provide me loads of convenience.
+  A quick method to install Check is via the terminal for those who like to copy and paste:
+
+   sudo apt-get update && sudo apt-get install checkinstall
+
+1.2 Testing demos
+  The first thing is to understand how to implement Check, so I made a few attempts like how to make the file and test in “makefile”, especially I ran into some problems before using the CFLAGS (-Wall -Wextra -Wfloat-equal -pedantic -ansi -lm) and the TCHECK (-lcheck -lsubunit -lpthread -lrt). So generally, just compile with “make test” in order to run the unit test. (before: https://drive.google.com/open?id=1-nLyAJYdWDb-lnfxC88yUOU5ubEutdKN) (after: https://drive.google.com/open?id=10-prqyeV8oxIgyRPeTT0AGbdW2HaODOo)
+  At this moment, I realized that you need to make extra work when making the Unit Test, so I have to examine each condition before building test for each function in my Teletext. So I have to make each function to return a value to determine whether the test is pass or fail. For example: 
+   START_TEST(test_readFileCodes)
+   {
+      fail_if(test_myreadFileCodes() != pass);
+   }
+   END_TEST
+  By applying this, I used enumeration:
+   typedef enum result {fail, pass, error}result;
+
+  The 'error' is only appeared when a function needed for the test is missing or the test fails for a different reason, like test_disHandleEven, if I don't stop the SDL_PollEvent in time, the test result must be '(after this point) Test timeout expired'.
+
+1.3 Function applications
+  It took me a few days to find out how to create Teletext. After all, we need to read the file such as test.m7, panda.m7, lfc.m7 into our code and render its true picture, and I found out those m7 files were built by binary code. So “fread” (automatically index after reading the file system) and “fwrite” are the key points to read binary file into C. Actually, I found bugs in use of coefficient to dissolve the one-dimension array passed from fread into a two-dimension array. So I made tests to try to print out the file, and it just performance as what I expected. (https://drive.google.com/open?id=1e5QmQZ9k02UUM14S_z_yI0Hbg0Qpbvyz)
+
+2. Document reading
+  After that, I started thinking about separate my code into three parts (status, cell, display). 
+
+2.1 Building and testing functions (status)
+  Firstly, I built the status module which contains functions (fread) to fetch binary files (ex, test.m7) and writing the status (like "color alphanumeric", "contiguous or separate graphics", "single or double height") from binary file to each cell. In addition, its functions are tested by attempting to write values to a cell within the test functions, and then checking the cell to see if it is in the right status. 
+
+2.1.1 readFileCodes
+  I need to check if m7 files are being read correctly. So this test mainly compares the input read (Uint8 a[HEIGHT][WIDTH]) from FILENAME (test.m7) using fread and the two-dimension array which stored in cellarray by using loop. This contains a two-dimension array of 8-bit unsigned integers read from FILENAME (test.m7) as well.
+
+2.1.2 staArray (staMode, staCellSet)
+  These functions should test the status of each value of struct status (fgcolor, bgcolor, dismode, height, holdgraphics) is written with the right attribute or not. Thus I have to check every status in cellarray to see if each code should be set to each array.
+
+   int test_mystaArray
+   int test_mystaCellSet
+   int test_mystaMode
+
+2.1.3 staInit
+  Doing some research on Teletext made me realize that you really need to reinitialize the assignment of every line into default set when moving to a newline, so everything must like: 
+  
+   fgcolor = white
+   bgcolor = black
+   dismode = alphanumeric
+   height = single
+   holdgraphics = release
+
+2.2 Building and testing functions (cell)
+  Secondly, cell module is in charge of reading the font files and cell status, and writing to the cell's internal pixel array. Each cell has an array of FNTHEIGHT Uint16, which is considered as a two-dimension array of bits. Cell module can fill the contents of arrays on account of the internal status of cell, such as graphics mode, height, etc. These tests I ran on its functions tend to pass it a pre-initialized cell and check what pixel arrays it produces. For example, sixels, double height and holds graphics can be examined to the nearest pixel. Moreover, in test_mycelFillArrayPixel_doubleTop, a cell is initialized as double height and a fonttile is sent to celFillArrayPixel. And then the cell's pixel array is checked to see if it has replicated each of the top 9 lines in the fonttile.
+
+2.2.1 celLoadFont (celReadFont)
+  This part (font reading function) by comparing the font read from m7fixed.fnt with data extracted from the same file. To some extent, is a bit same as readFileCodes, but the goal is different, because it read the font data base on “m7fixed.fnt”, and I need to build a directory for font, thus declaring Uint16 font[FNTMODE][FNTCHARS][FNTHEIGHT]. 
+  As a result, I built the program “teletext_font.c”, which creates fonts for contiguous graphic mode and separated graphic mode respectively. It loads m7fixed.fnt as a baseline, so that font data for blast-through text can be retained, then use the information given in the specification to see which sixels should be lit and which should not. For instance, if the LSB is 1, the top left sixel is lighted. The pixel values of the sixels are stored in an array of 6 8-bit numbers, and then making contiguous and separated fonts is easy to produce and so does the other shapes. So right now we can apply enum displayMode {alphanumeric, contiguous, separated }.
+
+2.3 Building and testing functions (display)
+  So the last part is the stage for drawing contents based on SDL. First thing to do is to initialize the frame (window), and then use functions which built-in SDL2/SDL.h to render the contents of each array and cell. I think the SDL test might be the most difficult part to test as I spent almost a week figuring up how to implement the SDL library, including several times trying to output the printing from m7 files as well. Most of the information I read were based on the site (https://www.libsdl.org/).
+
+2.3.1 Building Frame (disInit)
+  In advance, I used SDL_Init(SDL_INIT_VIDEO) to call SDL’s video subsystem, which automatically initializes the events subsystem. And also I need to set up SDL_CreateWindow and SDL_CreateRenderer to make the specified position, dimensions, flags and a two-dimension rendering context for a window.
+
+2.3.2 Render (disRenderCellArray, disRenderCell, disDrawColorSet)
+  This stage is responsible for rendering the contents on each cell by using the loop again (disRenderCellArray). While we can use disDrawColorSet to select the Uint8 color code to render contents (foreground color and background color) by using SDL_SetRenderDrawColor. After that we can utilize SDL_RenderPresent to update the screen with any rendering performed since the previous call, and also apply SDL_RenderClear to clear the current rendering target with the drawing color. 
+
+2.3.4 Output (dispEventHandler)
+  Since most of the work has been done, just use SDL_PollEvent to poll for currently pending events. In addition, use SDL_QUIT or SDL_KEYDOWN (code: SDLK_ESCAPE, SDLK_SPACE) to clean up all initialized subsystems by calling exit conditions.
